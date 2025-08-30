@@ -1,112 +1,169 @@
-# Streamlit Application Template
+# S3 Vectors 検索システム
 
-## 概要
+AWS S3 Vectors と Amazon Bedrock を使用したセマンティック検索システムのテストです。マークダウンファイルを見出しごとにチャンク分割して埋め込みベクトル化し、意味的類似性による検索を実現します。
 
-このレポジトリは、Streamlit アプリケーションの開発のためのテンプレートです。Docker 化された環境で、ホットリロードに対応しており、コードの変更がリアルタイムでアプリケーションに反映されます。
+## 主な機能
 
-## 必要条件
+- **マークダウン対応**: `## 見出し` ごとに自動チャンク分割
+- **セマンティック検索**: Amazon Titan Embeddings v2 による意味検索
+- **Streamlit UI**: 直感的なウェブインターフェース
+- **AWS S3 Vectors**: 高速なベクトル検索基盤
 
-- Docker
-- Docker Compose
+## 事前準備
 
-## プロジェクト構造
+### 1. AWS 環境設定
 
+#### S3 Vectors バケット作成
+
+AWS マネジメントコンソールまたは CLI で以下を実行：
+
+```bash
+# S3 Vectors バケット作成
+aws s3vectors create-vector-bucket --vector-bucket-name your-vector-bucket --region us-west-2
+
+# インデックス作成（1024次元 for Titan Embeddings v2）
+aws s3vectors create-index \
+    --vector-bucket-name your-vector-bucket \
+    --index-name your-vector-index \
+    --index-configuration '{
+        "algorithm": "COSINE",
+        "dimensions": 1024,
+        "metadataConfiguration": {
+            "metadataKeys": ["heading", "timestamp", "chunk_index", "full_length"]
+        }
+    }' \
+    --region us-west-2
 ```
 
+#### Bedrock モデルアクセス許可
+
+1. AWS マネジメントコンソール → Amazon Bedrock
+2. 「Model access」→ 「Edit」
+3. **Amazon Titan Embed Text v2** にアクセス許可
+
+#### IAM 権限設定
+
+実行ユーザーに以下の権限が必要：
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3vectors:*", "bedrock:InvokeModel"],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+### 2. 環境変数設定
+
+`.streamlit/secrets.toml` ファイルを作成：
+
+```toml
+[aws]
+region = "us-west-2"
+bucket_name = "your-vector-bucket"
+index_name = "your-vector-index"
+
+[bedrock]
+embedding_model_id = "amazon.titan-embed-text-v2:0"
+```
+
+### 3. Python 環境構築
+
+仮想環境での実行を推奨
+
+```bash
+# 依存関係インストール
+pip install -r requirements.txt
+
+# アプリケーション起動
+streamlit run app.py
+```
+
+## アプリケーション使用方法
+
+### マークダウン登録モード
+
+1. **ファイルアップロード**: `.md` または `.txt` ファイルを選択
+2. **内容をプレビュー**: チャンク分割結果を事前確認
+3. **ベクトル登録**: 見出し（`## タイトル`）ごとに自動分割・登録
+
+### テキスト直接登録モード
+
+1. テキストエリアにマークダウンを直接入力
+2. サンプルテキスト機能で動作確認可能
+3. ベクトル登録で埋め込み生成・保存
+
+### 検索モード
+
+1. **クエリ入力**: 自然言語で検索内容を記述
+2. **取得件数調整**: スライダーで結果数を選択（1-10 件）
+3. **検索実行**: 類似度スコア・見出し・内容を表示
+
+## 管理ユーティリティ
+
+### ベクトル数確認
+
+```bash
+python vector_count.py
+```
+
+現在登録されているベクトル総数を表示します。
+
+### データ完全削除
+
+```bash
+python delete_vector_bucket.py
+```
+
+⚠️ **警告**: バケット内の全インデックスとベクトルが完全削除されます。
+
+## トラブルシューティング
+
+### 想定エラー
+
+**ValidationException: Malformed input request**
+
+- AWS 認証情報を確認
+- Bedrock モデルアクセス許可を確認
+
+**Invalid record: Filterable metadata must have at most 2048 bytes**
+
+- メタデータサイズ制限（2048 バイト）エラー
+- 長すぎるテキストが自動で切り詰められます
+
+**検索結果が表示されない**
+
+- ベクトル登録が完了しているか確認
+- クエリが適切な日本語・英語で記述されているか確認
+
+### デバッグ情報
+
+- 各モードでプレビュー機能を活用
+- 検索結果で詳細メタデータを確認
+- `vector_count.py` でデータ登録状況を把握
+
+## プロジェクト構成
+
+```
 .
-├── .gitignore
-├── README.md
-├── docker-compose.yml
-├── Dockerfile
-├── requirements.txt
-├── .streamlit/ # Streamlit 設定ディレクトリ
-│ ├── secrets.toml # 環境変数（gitignore 対象）
-│ └── secrets.toml.template # 環境変数のテンプレート
-├── src/ # アプリケーションのソースコード
-│ ├── main.py # メインの Streamlit アプリケーション
-│ ├── pages/ # 追加のページ
-│ ├── config/ # 設定ファイル
-│ └── utils/ # ユーティリティ関数
-├── data/ # データファイル
-│ ├── raw/ # 生データ
-│ └── processed/ # 処理済みデータ
-└── tests/ # テストコード
-
+├── app.py                    # メインアプリケーション
+├── delete_vector_bucket.py   # データ削除ユーティリティ
+├── vector_count.py          # ベクトル数確認ユーティリティ
+├── .streamlit/
+│   └── secrets.toml         # AWS認証・設定情報
+├── data/
+│   └── sample_text.md       # サンプルマークダウン（オプション）
+└── secrets.toml.template    # 設定テンプレート
 ```
 
-## セットアップと実行
+## 技術仕様
 
-### 環境変数の設定
-
-1. `.streamlit/secrets.toml.template`をコピーして`.streamlit/secrets.toml`を作成します：
-
-```bash
-cp .streamlit/secrets.toml.template .streamlit/secrets.toml
-```
-
-2. `.streamlit/secrets.toml`を編集して必要な環境変数を設定します。
-   このファイルは`.gitignore`に含まれており、機密情報を安全に管理できます。
-
-設定例（secrets.toml）：
-
-```toml
-# API Keys
-openai_api_key = "your-api-key-here"
-
-# Database Configuration
-db_host = "localhost"
-db_port = 5432
-db_name = "mydatabase"
-
-# Other Settings
-debug = true
-```
-
-### アプリケーションの起動
-
-```bash
-# コンテナのビルドと起動
-docker-compose up --build
-
-# バックグラウンドで起動する場合
-docker-compose up -d --build
-```
-
-アプリケーションは http://localhost:8501 でアクセスできます。
-
-[以下、前の README と同様]
-
-```
-
-また、`.gitignore`に以下の行を追加することを推奨します：
-
-```
-
-# Streamlit secrets
-
-.streamlit/secrets.toml
-
-````
-
-そして、`secrets.toml.template`には以下のような内容を記載することをお勧めします：
-
-```toml
-# API Keys
-openai_api_key = "your-api-key-here"
-
-# Application Settings
-debug = true
-
-# Add other configuration variables as needed
-# database_url = "postgresql://user:password@localhost:5432/dbname"
-# aws_access_key = "your-access-key"
-# aws_secret_key = "your-secret-key"
-````
-
-このアプローチの利点：
-
-1. Streamlit の公式推奨方法に従っている
-2. 設定の一元管理が可能
-3. テンプレートファイルにより必要な設定が明確
-4. Docker 環境でも適切に動作する
-5. セキュリティ的に安全（secrets.toml は gitignore される）
+- **埋め込みモデル**: Amazon Titan Embed Text v2 (1024 次元)
+- **ベクトル検索**: AWS S3 Vectors (コサイン類似度)
+- **チャンク分割**: マークダウン見出し基準（最大 1000 文字）
+- **UI フレームワーク**: Streamlit
